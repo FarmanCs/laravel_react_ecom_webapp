@@ -2,160 +2,110 @@ import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import { useError } from '../context/ErrorContext';
 
 const Cart = () => {
   const { cartItems, cartTotal, loading, fetchCart, updateCartItem, removeFromCart } = useCart();
   const { user } = useAuth();
+  const { addError } = useError();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (user) {
-      fetchCart();
-    }
-  }, []);
+    if (user) fetchCart();
+  }, [user]);
 
-  const handleQuantityChange = (itemId, newQuantity) => {
-    if (newQuantity < 1) return;
-    updateCartItem(itemId, newQuantity);
+  const handleQuantityChange = async (itemId, newQuantity) => {
+    if (newQuantity < 1) {
+      addError({ type: 'error', message: 'Invalid Quantity', details: 'Quantity must be at least 1' });
+      return;
+    }
+    try {
+      await updateCartItem(itemId, newQuantity);
+    } catch (error) { console.error('Update cart error:', error); }
   };
 
-  const handleRemove = (itemId) => {
-    removeFromCart(itemId);
+  const handleRemove = async (itemId) => {
+    try {
+      await removeFromCart(itemId);
+      addError({ type: 'success', message: 'Item Removed', details: 'Item has been removed from cart' });
+    } catch (error) { console.error('Remove from cart error:', error); }
   };
 
   const handleCheckout = () => {
+    if (cartItems.length === 0) {
+      addError({ type: 'error', message: 'Empty Cart', details: 'Please add items to your cart before checking out' });
+      return;
+    }
     navigate('/checkout');
   };
 
   if (!user) {
     return (
-      <div style={styles.container}>
-        <p>Please login to view your cart.</p>
+      <div className="container">
+        <div className="auth-required-box">
+          <span className="auth-icon">🔐</span>
+          <h2 className="auth-title">Login Required</h2>
+          <p>Please login to view your shopping cart.</p>
+          <button onClick={() => navigate('/login')} className="login-btn">Go to Login</button>
+        </div>
       </div>
     );
   }
 
   if (loading) {
     return (
-      <div style={styles.container}>
-        <p>Loading cart...</p>
+      <div className="container">
+        <div className="loading-container">
+          <div className="spinner"></div>
+          <p>Loading your cart...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={styles.container}>
-      <h1 style={styles.heading}>Shopping Cart</h1>
-
+    <div className="container">
+      <h1 className="heading">Shopping Cart</h1>
       {cartItems.length === 0 ? (
-        <p style={styles.empty}>Your cart is empty.</p>
+        <div className="empty-state">
+          <span className="empty-icon">🛒</span>
+          <p className="empty-title">Your cart is empty</p>
+          <p className="empty-subtext">Add some items to get started</p>
+          <button onClick={() => navigate('/products')} className="continue-shopping-btn">Continue Shopping</button>
+        </div>
       ) : (
         <>
-          <div style={styles.itemsList}>
+          <div className="items-list">
             {cartItems.map((item) => (
-              <div key={item.id} style={styles.item}>
-                <div style={styles.itemInfo}>
-                  <h3 style={styles.itemName}>
-                    {item.product ? item.product.name : 'Product'}
-                  </h3>
-                  <p style={styles.itemPrice}>${item.price} each</p>
+              <div key={item.id} className="cart-item">
+                <div className="item-info">
+                  <h3 className="item-name">{item.product?.name || 'Product'}</h3>
+                  <p className="item-price">${Number(item.price).toFixed(2)} each</p>
                 </div>
-                <div style={styles.itemActions}>
-                  <button
-                    onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
-                    style={styles.qtyBtn}
-                  >
-                    -
-                  </button>
-                  <span style={styles.qty}>{item.quantity}</span>
-                  <button
-                    onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
-                    style={styles.qtyBtn}
-                  >
-                    +
-                  </button>
-                  <span style={styles.subtotal}>
-                    ${(item.price * item.quantity).toFixed(2)}
-                  </span>
-                  <button
-                    onClick={() => handleRemove(item.id)}
-                    style={styles.removeBtn}
-                  >
-                    Remove
-                  </button>
+                <div className="item-actions">
+                  <button onClick={() => handleQuantityChange(item.id, item.quantity - 1)} className="qty-btn">−</button>
+                  <span className="qty">{item.quantity}</span>
+                  <button onClick={() => handleQuantityChange(item.id, item.quantity + 1)} className="qty-btn">+</button>
+                  <span className="subtotal">${Number(item.price * item.quantity).toFixed(2)}</span>
+                  <button onClick={() => handleRemove(item.id)} className="remove-btn">Remove</button>
                 </div>
               </div>
             ))}
           </div>
-          <div style={styles.totalSection}>
-            <h2>Total: ${Number(cartTotal).toFixed(2)}</h2>
-            <button onClick={handleCheckout} style={styles.checkoutBtn}>
-              Proceed to Checkout
-            </button>
+          <div className="total-section">
+            <div className="total-info">
+              <h2 className="total-label">Total:</h2>
+              <h2 className="total-amount">${Number(cartTotal).toFixed(2)}</h2>
+            </div>
+            <div className="cart-actions">
+              <button onClick={() => navigate('/products')} className="continue-shopping-btn">Continue Shopping</button>
+              <button onClick={handleCheckout} className="checkout-btn">Proceed to Checkout →</button>
+            </div>
           </div>
         </>
       )}
     </div>
   );
-};
-
-const styles = {
-  container: { maxWidth: '800px', margin: '0 auto', padding: '24px' },
-  heading: { color: '#2c3e50', marginBottom: '20px' },
-  empty: { textAlign: 'center', color: '#999', marginTop: '40px' },
-  itemsList: { marginBottom: '24px' },
-  item: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '16px',
-    background: '#fff',
-    borderRadius: '8px',
-    boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
-    marginBottom: '12px',
-  },
-  itemInfo: {},
-  itemName: { margin: 0, color: '#2c3e50', fontSize: '16px' },
-  itemPrice: { color: '#666', fontSize: '14px', margin: '4px 0 0' },
-  itemActions: { display: 'flex', alignItems: 'center', gap: '12px' },
-  qtyBtn: {
-    width: '32px',
-    height: '32px',
-    border: '1px solid #ddd',
-    borderRadius: '4px',
-    background: '#f8f9fa',
-    cursor: 'pointer',
-    fontSize: '16px',
-  },
-  qty: { fontSize: '16px', fontWeight: 'bold', minWidth: '20px', textAlign: 'center' },
-  subtotal: { fontSize: '16px', fontWeight: 'bold', color: '#27ae60', minWidth: '80px' },
-  removeBtn: {
-    background: '#e74c3c',
-    color: '#fff',
-    border: 'none',
-    padding: '6px 12px',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '13px',
-  },
-  totalSection: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '20px',
-    background: '#fff',
-    borderRadius: '8px',
-    boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
-  },
-  checkoutBtn: {
-    padding: '12px 32px',
-    backgroundColor: '#27ae60',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '4px',
-    fontSize: '16px',
-    cursor: 'pointer',
-  },
 };
 
 export default Cart;

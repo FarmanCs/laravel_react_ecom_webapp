@@ -31,7 +31,10 @@ class CartController extends Controller
     )]
     public function index(Request $request)
     {
-        $cart = Cart::where('status', 'active')
+        $user = $request->user();
+
+        $cart = Cart::where('user_id', $user->id)
+            ->where('status', 'active')
             ->with('items.product')
             ->first();
 
