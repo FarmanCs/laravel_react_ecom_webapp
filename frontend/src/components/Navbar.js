@@ -1,5 +1,6 @@
-import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
+import { LogOut, ShoppingCart, Package, Home } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 
@@ -10,61 +11,59 @@ const Navbar = () => {
 
   const handleLogout = async () => {
     await logout();
+    toast.success('Logged out successfully');
     navigate('/login');
   };
 
   return (
-    <nav style={styles.nav}>
-      <div style={styles.brand}>
-        <Link to="/" style={styles.brandLink}>ShopApp</Link>
-      </div>
-      <div style={styles.links}>
-        <Link to="/products" style={styles.link}>Products</Link>
-        {user ? (
-          <>
-            <Link to="/cart" style={styles.link}>
-              Cart ({cartItems.length})
-            </Link>
-            <Link to="/orders" style={styles.link}>Orders</Link>
-            <span style={styles.userName}>{user.name}</span>
-            <button onClick={handleLogout} style={styles.logoutBtn}>
-              Logout
-            </button>
-          </>
-        ) : (
-          <>
-            <Link to="/login" style={styles.link}>Login</Link>
-            <Link to="/register" style={styles.link}>Register</Link>
-          </>
-        )}
+    <nav className="navbar">
+      <div className="navbar-container">
+        <Link to="/" className="navbar-brand">
+          <Home size={24} />
+          ShopApp
+        </Link>
+
+        <ul className="navbar-links">
+          <li>
+            <Link to="/products" className="navbar-link">Products</Link>
+          </li>
+
+          {user ? (
+            <>
+              <li>
+                <Link to="/cart" className="navbar-link cart-link">
+                  <ShoppingCart size={15} />
+                  Cart ({cartItems.length})
+                </Link>
+              </li>
+              <li>
+                <Link to="/orders" className="navbar-link">
+                  <Package size={20} />
+                  Orders
+                </Link>
+              </li>
+              <li className="navbar-user">
+                <span className="user-name">{user.name}</span>
+                <button onClick={handleLogout} className="btn btn-logout">
+                  <LogOut size={18} />
+                  Logout
+                </button>
+              </li>
+            </>
+          ) : (
+            <>
+              <li>
+                <Link to="/login" className="navbar-link">Login</Link>
+              </li>
+              <li>
+                <Link to="/register" className="btn btn-primary btn-sm">Register</Link>
+              </li>
+            </>
+          )}
+        </ul>
       </div>
     </nav>
   );
-};
-
-const styles = {
-  nav: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '12px 24px',
-    backgroundColor: '#2c3e50',
-    color: '#fff',
-  },
-  brand: { fontSize: '20px', fontWeight: 'bold' },
-  brandLink: { color: '#fff', textDecoration: 'none' },
-  links: { display: 'flex', alignItems: 'center', gap: '16px' },
-  link: { color: '#ecf0f1', textDecoration: 'none', fontSize: '14px' },
-  userName: { color: '#3498db', fontSize: '14px' },
-  logoutBtn: {
-    background: '#e74c3c',
-    color: '#fff',
-    border: 'none',
-    padding: '6px 12px',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '13px',
-  },
 };
 
 export default Navbar;

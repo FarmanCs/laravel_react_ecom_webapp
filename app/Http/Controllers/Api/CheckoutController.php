@@ -7,6 +7,7 @@ use App\Models\Cart;
 use App\Models\Order;
 use App\Models\OrderItem;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use OpenApi\Attributes as OA;
 
 class CheckoutController extends Controller
@@ -44,47 +45,80 @@ class CheckoutController extends Controller
     {
         $user = $request->user();
 
-        $cart = Cart::where('user_id', $user->id)
-            ->where('status', 'active')
-            ->with('items.product')
-            ->first();
+        // Start a database transaction for ACID insertion  and to handle concurrency issues during checkout
+        DB::beginTransaction();
 
-        if (!$cart || $cart->items->isEmpty()) {
-            return response()->json([
-                'message' => 'Cart is empty',
-            ], 400);
-        }
+        try {
+            // Lock the active cart to prevent concurrent checkouts
+            $cart = Cart::where('user_id', $user->id)
+                ->where('status', 'active')
+                ->with('items.product')
+                ->lockForUpdate() //this function will lock the selected cart row until the transaction is committed or rolled back, preventing other transactions from modifying it concurrently.
+                ->first();
 
-        $total = $cart->getTotal();
+            if (!$cart || $cart->items->isEmpty()) {
+                return response()->json([
+                    'message' => 'Cart is empty',
+                ], 400);
+            }
 
-        $order = Order::create([
-            'user_id' => $user->id,
-            'total' => $total,
-            'status' => 'pending',
-            'payment_method' => $request->payment_method,
-            'shipping_address' => $request->shipping_address,
-            'billing_address' => $request->billing_address,
-        ]);
+            $total = $cart->getTotal();
 
-        foreach ($cart->items as $cartItem) {
-            OrderItem::create([
-                'order_id' => $order->id,
-                'product_id' => $cartItem->product_id,
-                'product_name' => $cartItem->product->name,
-                'quantity' => $cartItem->quantity,
-                'price' => $cartItem->price,
+            // Validate stock availability for all items (optional but recommended)
+            foreach ($cart->items as $cartItem) {
+                if ($cartItem->product->stock < $cartItem->quantity) {
+                    DB::rollBack();
+                    return response()->json([
+                        'message' => "Insufficient stock for {$cartItem->product->name}",
+                    ], 422);
+                }
+                // Decrement stock inside the transaction (if your application tracks stock)
+                $cartItem->product->decrement('stock', $cartItem->quantity);
+            }
+
+            // Create the order
+            $order = Order::create([
+                'user_id'          => $user->id,
+                'total'            => $total,
+                'status'           => 'pending',
+                'payment_method'   => $request->payment_method,
+                'shipping_address' => $request->shipping_address,
+                'billing_address'  => $request->billing_address,
             ]);
+
+            //  Create order items
+            foreach ($cart->items as $cartItem) {
+                OrderItem::create([
+                    'order_id'     => $order->id,
+                    'product_id'   => $cartItem->product_id,
+                    'product_name' => $cartItem->product->name,
+                    'quantity'     => $cartItem->quantity,
+                    'price'        => $cartItem->price,
+                ]);
+            }
+
+            //  Mark cart as checked out
+            $cart->status = 'checked_out';
+            $cart->save();
+
+            // If everything succeeded insert data and  commit the transaction
+            DB::commit();
+
+            // Load relationships after commit (data is now durable)
+            $order->load('items');
+
+            return response()->json([
+                'message' => 'Order placed successfully',
+                'order'   => $order,
+            ], 201);
+        } catch (\Exception $e) {
+            // Rollback any partial changes
+            DB::rollBack();
+
+            return response()->json([
+                'message' => 'Checkout failed. Please try again.',
+            ], 500);
         }
-
-        $cart->status = 'checked_out';
-        $cart->save();
-
-        $order->load('items');
-
-        return response()->json([
-            'message' => 'Order placed successfully',
-            'order' => $order,
-        ], 201);
     }
 
     #[OA\Get(

@@ -1,8 +1,15 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { toast } from 'react-toastify';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  AlertCircle,
+  Loader,
+} from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
-import { useError } from '../context/ErrorContext';
 
 const Products = () => {
   const [products, setProducts] = useState([]);
@@ -10,141 +17,170 @@ const Products = () => {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  const [searching, setSearching] = useState(false);
+  const [categoryLoading, setCategoryLoading] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [lastPage, setLastPage] = useState(1);
+  const [perPage, setPerPage] = useState(15);
+  const [total, setTotal] = useState(0);
+  const [from, setFrom] = useState(0);
+  const [to, setTo] = useState(0);
   const [error, setError] = useState(null);
+  const [searchError, setSearchError] = useState('');
+  const [addingToCart, setAddingToCart] = useState({}); // track per-product loading
   const { user } = useAuth();
   const { addToCart } = useCart();
-  const { addError } = useError();
-
   const debounceTimeout = useRef(null);
   const isInitialMount = useRef(true);
 
-  // Core fetch function
-  const fetchProducts = useCallback(async () => {
+  // Fetch function – kept stable with a ref to avoid dependency issues
+  const fetchProductsRef = useRef();
+  fetchProductsRef.current = async (
+    page = 1,
+    itemsPerPage = 15,
+    showCategorySpinner = false,
+    showSearchSpinner = false
+  ) => {
     try {
-      const params = {};
+      if (showCategorySpinner) setCategoryLoading(true);
+      if (showSearchSpinner) setSearchLoading(true);
+      if (!showCategorySpinner && !showSearchSpinner) setLoading(true);
+
+      const params = { page, per_page: itemsPerPage };
+
+      // Use current state values it captured inside the ref hot, so they are always fresh.
       if (selectedCategory) params.category_id = selectedCategory;
-      if (search) params.search = search;
+      if (search && search.trim().length >= 3) params.search = search.trim();
 
       const response = await api.get('/products', { params });
+
       setProducts(response.data.data || []);
+      setCurrentPage(response.data.meta?.current_page || 1);
+      setLastPage(response.data.meta?.last_page || 1);
+      setPerPage(response.data.meta?.per_page || 15);
+      setTotal(response.data.meta?.total || 0);
+      setFrom(response.data.meta?.from || 0);
+      setTo(response.data.meta?.to || 0);
+      setError(null);
+      setSearchError('');
       return true;
     } catch (error) {
-      addError({
-        type: 'error',
-        message: 'Failed to load products',
-        details: error.details,
-      });
+      console.error('Error fetching products:', error);
+      toast.error('Failed to load products');
       setProducts([]);
+      setError('Failed to load products');
       throw error;
+    } finally {
+      setLoading(false);
+      setCategoryLoading(false);
+      setSearchLoading(false);
     }
-  }, [selectedCategory, search, addError]);
-
-  // Category change only depends on selectedCategory, not fetchProducts
-  useEffect(() => {
-    if (isInitialMount.current) return;
-    if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
-    setSearching(true);
-    fetchProducts().finally(() => setSearching(false));
-  }, [selectedCategory]);
-
-  // ✅ Search debounce: fetch when empty OR >=3 chars, with 1000ms delay
-  useEffect(() => {
-    if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
-
-    const shouldSearch = search.length === 0 || search.length >= 3;
-
-    if (shouldSearch) {
-      setSearching(true);
-      debounceTimeout.current = setTimeout(() => {
-        fetchProducts().finally(() => setSearching(false));
-      }, 1000);
-    } else {
-      setSearching(false);
-    }
-
-    return () => {
-      if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
-    };
-  }, [search, fetchProducts]);
-
-  // Initial load (once)
-  useEffect(() => {
-    const loadInitial = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        await Promise.all([fetchCategories(), fetchProducts()]);
-      } catch (err) {
-        console.error('Failed to load initial data:', err);
-        setError('Failed to load products. Please refresh the page.');
-      } finally {
-        setLoading(false);
-        isInitialMount.current = false;
-      }
-    };
-    loadInitial();
-  }, []);
+  };
 
   const fetchCategories = async () => {
     try {
       const response = await api.get('/categories');
       setCategories(response.data.data || []);
     } catch (error) {
-      addError({
-        type: 'warning',
-        message: 'Failed to load categories',
-        details: error.details,
-      });
+      console.error('Error fetching categories:', error);
+      toast.warning('Failed to load categories', { autoClose: 2000 });
       setCategories([]);
     }
   };
 
-  const handleSearchChange = (e) => {
-    setSearch(e.target.value);
-  };
+  // Initial load
+  useEffect(() => {
+    const loadInitial = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        await fetchCategories();
+        await fetchProductsRef.current(1, 15);
+      } catch (err) {
+        setError('Failed to load products. Please refresh the page.');
+      } finally {
+        isInitialMount.current = false;
+      }
+    };
+    loadInitial();
+  }, []);
 
-  const handleSearchSubmit = (e) => {
-    e.preventDefault();
+  // Category change  immediate fetch lears any pending search debounce
+  useEffect(() => {
+    if (isInitialMount.current) return;
+    // Cancel any pending search debounce when category changes
     if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
-    if (search.length === 0 || search.length >= 3) {
-      setSearching(true);
-      fetchProducts().finally(() => setSearching(false));
-    } else {
-      addError({
-        type: 'warning',
-        message: 'Search query too short',
-        details: 'Please enter at least 3 characters to search.',
-      });
-    }
-  };
+    setCurrentPage(1);
+    fetchProductsRef.current(1, perPage, true, false);
+  }, [selectedCategory]);
 
+  // Search effect (debounced, minimum 3 characters, no clearing of products)
+  useEffect(() => {
+    if (isInitialMount.current) return;
+
+    if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+
+    // Update validation message
+    if (search.length > 0 && search.length < 3) {
+      setSearchError(`Minimum 3 characters required (${search.length}/3)`);
+    } else {
+      setSearchError('');
+    }
+
+    const shouldSearch = search.length === 0 || search.length >= 3;
+
+    if (shouldSearch) {
+      debounceTimeout.current = setTimeout(() => {
+        setCurrentPage(1);
+        // Show search spinner for any search action (including clearing)
+        fetchProductsRef.current(1, perPage, false, true);
+      }, 1000);
+    }
+
+    return () => {
+      if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+    };
+  }, [search, perPage]);
+
+  // Add to cart with per-product loading state
   const handleAddToCart = async (productId) => {
     if (!user) {
-      addError({
-        type: 'warning',
-        message: 'Login Required',
-        details: 'Please login to add items to cart',
-      });
+      toast.warning('Please login to add items to cart', { autoClose: 2000 });
       return;
     }
+    setAddingToCart((prev) => ({ ...prev, [productId]: true }));
     try {
       await addToCart(productId, 1);
-      addError({
-        type: 'success',
-        message: 'Success!',
-        details: 'Item added to cart',
-      });
+      toast.success('Item added to cart', { autoClose: 2000 });
     } catch (error) {
-      console.error('Add to cart error:', error);
+      // console.error('Add to cart error:', error);
+      toast.error('Failed to add item to cart');
+    } finally {
+      setAddingToCart((prev) => ({ ...prev, [productId]: false }));
     }
   };
 
-  if (loading) {
+  const handlePageChange = (newPage) => {
+    if (newPage < 1 || newPage > lastPage) return;
+    setCurrentPage(newPage);
+    fetchProductsRef.current(newPage, perPage);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handlePerPageChange = (e) => {
+    const newPerPage = Number(e.target.value);
+    setPerPage(newPerPage);
+    setCurrentPage(1);
+    fetchProductsRef.current(1, newPerPage);
+  };
+
+  if (loading && products.length === 0) {
     return (
-      <div style={styles.container}>
-        <div style={styles.loadingContainer}>
-          <div style={styles.spinner}></div>
+      <div className="container">
+        <div className="loading-container">
+          <div className="spinner"></div>
+
+          {/* <Loader color="#007bff" size={30} className="thin-spinner " /> */}
           <p>Loading products...</p>
         </div>
       </div>
@@ -152,229 +188,218 @@ const Products = () => {
   }
 
   return (
-    <div style={styles.container}>
-      <h1 style={styles.heading}>Our Products</h1>
+    <div className="container">
+      <h1 className="heading">Our Products</h1>
+
       {error && (
-        <div style={styles.errorBanner}>
-          <span style={styles.errorIcon}>⚠️</span>
-          <div><strong>Error:</strong> {error}</div>
-          <button onClick={() => window.location.reload()} style={styles.retryBtn}>Retry</button>
+        <div className="alert alert-error">
+          <AlertCircle size={20} />
+          <div>
+            <strong>Error:</strong> {error}
+            <button
+              onClick={() => window.location.reload()}
+              className="btn btn-sm btn-danger"
+              style={{ marginLeft: 'auto' }}
+            >
+              Retry
+            </button>
+          </div>
         </div>
       )}
-      <div style={styles.filters}>
-        <div style={styles.categoryFilter}>
-          <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)} style={styles.select}>
+
+      <div className="filters">
+        {/* Category Filter with thin spinner */}
+        <div className="category-filter-wrapper">
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="filter-select"
+            disabled={categoryLoading}
+          >
             <option value="">All Categories</option>
             {categories.map((cat) => (
-              <option key={cat.id} value={cat.id}>{cat.name}</option>
+              <option key={cat.id} value={cat.id}>
+                {cat.name}
+              </option>
             ))}
           </select>
+          {categoryLoading && (
+            <div className="category-spinner-wrapper">
+              <Loader size={16} className="thin-spinner" />
+            </div>
+          )}
         </div>
-        <form onSubmit={handleSearchSubmit} style={styles.searchForm}>
-          <input
-            type="text"
-            placeholder="Search products... (min. 3 chars)"
-            value={search}
-            onChange={handleSearchChange}
-            style={styles.searchInput}
-          />
-          <button type="submit" style={styles.searchBtn} disabled={searching}>
-            {searching ? 'Searching...' : 'Search'}
-          </button>
-        </form>
+
+        {/* Search Input with thin spinner & validation */}
+        <div className="search-wrapper">
+          <div className="search-form">
+            <Search size={18} className="search-icon" />
+            <input
+              type="text"
+              placeholder="Search products..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="search-input"
+              disabled={searchLoading}
+              maxLength="100"
+            />
+            {searchLoading && (
+              <div className="search-spinner-wrapper">
+                <Loader size={16} className="thin-spinner" />
+              </div>
+            )}
+          </div>
+          {searchError && (
+            <p className="search-helper-text search-error">
+              <AlertCircle size={14} />
+              {searchError}
+            </p>
+          )}
+          {search.length > 0 && search.length >= 3 && !searchLoading && (
+            <p className="search-helper-text search-success">
+              ✓ Showing results for "{search}"
+            </p>
+          )}
+        </div>
       </div>
-      {searching && (
-        <div style={styles.searchingIndicator}>
-          <div style={styles.smallSpinner}></div>
-          <span>Searching...</span>
+
+      {/* Products Grid */}
+      <div className="products-grid">
+        {products.map((product) => (
+          <ProductCard
+            key={product.id}
+            product={product}
+            onAddToCart={handleAddToCart}
+            isAdding={addingToCart[product.id] || false}
+          />
+        ))}
+      </div>
+
+      {/* Empty State */}
+      {products.length === 0 && !error && !loading && (
+        <div className="empty-state">
+          <AlertCircle size={48} className="empty-icon" />
+          <p className="empty-title">
+            {search.length > 0 && search.length < 3
+              ? 'Keep typing...'
+              : 'No products found'}
+          </p>
+          <p className="empty-subtext">
+            {search.length > 0 && search.length < 3
+              ? `Enter at least ${3 - search.length} more character${3 - search.length !== 1 ? 's' : ''
+              }`
+              : 'Try adjusting your search or filters'}
+          </p>
         </div>
       )}
-      <div style={styles.grid}>
-        {products.map((product) => (
-          <div key={product.id} style={styles.card}>
-            <div style={styles.cardBody}>
-              <span style={styles.category}>{product.category}</span>
-              <h3 style={styles.productName}>{product.name}</h3>
-              <p style={styles.description}>{product.description}</p>
-              <div style={styles.priceRow}>
-                <span style={styles.price}>${Number(product.price).toFixed(2)}</span>
-                <span style={{ ...styles.stock, color: product.stock > 0 ? '#27ae60' : '#e74c3c' }}>
-                  {product.stock > 0 ? `${product.stock} in stock` : 'Out of stock'}
+
+      {/* Pagination Controls */}
+      {total > 0 && (
+        <div className="pagination-section">
+          {lastPage > 1 && (
+            <div className="pagination-controls">
+              <button
+                onClick={() => handlePageChange(1)}
+                disabled={currentPage === 1}
+                className="pagination-btn"
+                title="First page"
+              >
+                First
+              </button>
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+                className="pagination-btn"
+              >
+                <ChevronLeft size={18} />
+                Previous
+              </button>
+              <div className="pagination-info">
+                <span className="page-counter">
+                  Page <strong>{currentPage}</strong> of <strong>{lastPage}</strong>
+                </span>
+                <span className="product-counter">
+                  Showing <strong>{from}</strong>–<strong>{to}</strong> of{' '}
+                  <strong>{total}</strong> products
                 </span>
               </div>
               <button
-                onClick={() => handleAddToCart(product.id)}
-                style={{ ...styles.addBtn, opacity: product.stock === 0 ? 0.5 : 1, cursor: product.stock === 0 ? 'not-allowed' : 'pointer' }}
-                disabled={product.stock === 0}
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage === lastPage}
+                className="pagination-btn"
               >
-                {product.stock === 0 ? 'Out of Stock' : 'Add to Cart'}
+                Next
+                <ChevronRight size={18} />
+              </button>
+              <button
+                onClick={() => handlePageChange(lastPage)}
+                disabled={currentPage === lastPage}
+                className="pagination-btn"
+                title="Last page"
+              >
+                Last
               </button>
             </div>
+          )}
+          <div className="items-per-page">
+            <label htmlFor="per-page-select">Show per page:</label>
+            <select
+              id="per-page-select"
+              value={perPage}
+              onChange={handlePerPageChange}
+              className="per-page-select"
+            >
+              <option value={15}>15 items</option>
+              <option value={30}>30 items</option>
+              <option value={60}>60 items</option>
+              <option value={90}>90 items</option>
+            </select>
           </div>
-        ))}
-      </div>
-      {products.length === 0 && !error && !searching && (
-        <div style={styles.emptyState}>
-          <span style={styles.emptyIcon}>📦</span>
-          <p style={styles.empty}>No products found.</p>
-          <p style={styles.emptySubtext}>Try adjusting your search or filters</p>
         </div>
       )}
     </div>
   );
 };
 
-const styles = {
-  container: { maxWidth: '1200px', margin: '0 auto', padding: '24px' },
-  heading: { color: '#2c3e50', marginBottom: '24px', fontSize: '32px' },
-  loadingContainer: {
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'center',
-    alignItems: 'center',
-    minHeight: '400px',
-    gap: '20px',
-  },
-  spinner: {
-    width: '50px',
-    height: '50px',
-    border: '4px solid #ecf0f1',
-    borderTopColor: '#3498db',
-    borderRadius: '50%',
-    animation: 'spin 1s linear infinite',
-  },
-  smallSpinner: {
-    width: '16px',
-    height: '16px',
-    border: '2px solid #ecf0f1',
-    borderTopColor: '#3498db',
-    borderRadius: '50%',
-    animation: 'spin 1s linear infinite',
-  },
-  searchingIndicator: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '8px 12px',
-    backgroundColor: '#e8f4f8',
-    borderRadius: '6px',
-    marginBottom: '20px',
-    fontSize: '14px',
-    color: '#3498db',
-  },
-  errorBanner: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    padding: '16px',
-    backgroundColor: '#fee',
-    borderLeft: '4px solid #e74c3c',
-    borderRadius: '6px',
-    marginBottom: '20px',
-    fontSize: '14px',
-    color: '#c00',
-  },
-  errorIcon: {
-    fontSize: '20px',
-    flexShrink: 0,
-  },
-  retryBtn: {
-    marginLeft: 'auto',
-    padding: '6px 12px',
-    backgroundColor: '#e74c3c',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '12px',
-  },
-  filters: {
-    display: 'flex',
-    gap: '16px',
-    marginBottom: '24px',
-    flexWrap: 'wrap',
-  },
-  categoryFilter: {},
-  select: {
-    padding: '10px',
-    borderRadius: '6px',
-    border: '1px solid #ddd',
-    fontSize: '14px',
-  },
-  searchForm: { display: 'flex', gap: '8px' },
-  searchInput: {
-    padding: '10px',
-    borderRadius: '6px',
-    border: '1px solid #ddd',
-    fontSize: '14px',
-    minWidth: '200px',
-  },
-  searchBtn: {
-    padding: '10px 20px',
-    backgroundColor: '#3498db',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontWeight: '500',
-    transition: 'opacity 0.2s',
-  },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-    gap: '20px',
-  },
-  card: {
-    background: '#fff',
-    borderRadius: '8px',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-    overflow: 'hidden',
-    transition: 'transform 0.2s, box-shadow 0.2s',
-  },
-  cardBody: { padding: '16px' },
-  category: {
-    fontSize: '12px',
-    color: '#7f8c8d',
-    textTransform: 'uppercase',
-    letterSpacing: '1px',
-  },
-  productName: { margin: '8px 0', color: '#2c3e50', fontSize: '18px', fontWeight: '600' },
-  description: { color: '#666', fontSize: '14px', marginBottom: '12px', lineHeight: '1.4' },
-  priceRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '12px',
-  },
-  price: { fontSize: '20px', fontWeight: 'bold', color: '#27ae60' },
-  stock: { fontSize: '13px', color: '#95a5a6' },
-  addBtn: {
-    width: '100%',
-    padding: '10px',
-    backgroundColor: '#2c3e50',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500',
-    transition: 'background-color 0.2s',
-  },
-  emptyState: {
-    textAlign: 'center',
-    padding: '60px 20px',
-  },
-  emptyIcon: {
-    fontSize: '60px',
-    display: 'block',
-    marginBottom: '16px',
-  },
-  empty: { color: '#999', fontSize: '18px', margin: '0 0 8px' },
-  emptySubtext: { color: '#bbb', fontSize: '14px', margin: 0 },
-};
+function ProductCard({ product, onAddToCart, isAdding }) {
+  return (
+    <div className="product-card">
+      <div className="product-category">{product.category}</div>
+      <h3 className="product-name">{product.name}</h3>
+      <p className="product-description">{product.description}</p>
 
-const styleSheet = document.createElement("style");
-styleSheet.textContent = `@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`;
-document.head.appendChild(styleSheet);
+      <div className="product-footer">
+        <div className="product-price-row">
+          <span className="product-price">
+            ${Number(product.price).toFixed(2)}
+          </span>
+          <span
+            className={`product-stock ${product.stock > 0 ? 'in-stock' : 'out-of-stock'
+              }`}
+          >
+            {product.stock > 0
+              ? `${product.stock} in stock`
+              : 'Out of stock'}
+          </span>
+        </div>
+
+        <button
+          onClick={() => onAddToCart(product.id)}
+          className={`btn btn-primary btn-block ${product.stock === 0 || isAdding ? 'disabled' : ''
+            }`}
+          disabled={product.stock === 0 || isAdding}
+        >
+          {isAdding ? (
+            <Loader size={16} className="thin-spinner" />
+          ) : product.stock === 0 ? (
+            'Out of Stock'
+          ) : (
+            'Add to Cart'
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default Products;

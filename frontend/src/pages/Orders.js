@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import { toast } from 'react-toastify';
+import { CheckCircle, Clock, XCircle, CreditCard, X } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { useError } from '../context/ErrorContext';
 
 const Orders = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [paymentLoading, setPaymentLoading] = useState({});
+  const [cancelLoading, setCancelLoading] = useState({});
   const { user } = useAuth();
-  const { addError } = useError();
 
   useEffect(() => {
     if (user) {
@@ -21,49 +23,45 @@ const Orders = () => {
       const response = await api.get('/orders');
       setOrders(response.data || []);
     } catch (error) {
-      addError({
-        type: 'error',
-        message: 'Failed to load orders',
-        details: error.details || 'Unable to fetch your orders',
-      });
+      toast.error(error.message || 'Failed to load orders');
       setOrders([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'paid':
-        return '#27ae60';
-      case 'pending':
-        return '#f39c12';
-      case 'failed':
-        return '#e74c3c';
-      default:
-        return '#95a5a6';
+  const handlePayOrder = async (orderId) => {
+    setPaymentLoading(prev => ({ ...prev, [orderId]: true }));
+    try {
+      await api.get(`/checkout/pay/${orderId}`);
+      toast.success('Payment processed successfully!');
+      fetchOrders();
+    } catch (error) {
+      toast.error(error.message || 'Payment failed. Please try again.');
+    } finally {
+      setPaymentLoading(prev => ({ ...prev, [orderId]: false }));
     }
   };
 
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'paid':
-        return '✓';
-      case 'pending':
-        return '⏱';
-      case 'failed':
-        return '✕';
-      default:
-        return '?';
+  const handleCancelOrder = async (orderId) => {
+    if (!window.confirm('Are you sure you want to cancel this order?')) return;
+
+    setCancelLoading(prev => ({ ...prev, [orderId]: true }));
+    try {
+      await api.post(`/orders/${orderId}/cancel`);
+      toast.success('Order cancelled successfully');
+      fetchOrders();
+    } catch (error) {
+      toast.error(error.message || 'Failed to cancel order');
+    } finally {
+      setCancelLoading(prev => ({ ...prev, [orderId]: false }));
     }
   };
 
   if (!user) {
     return (
-      <div style={styles.container}>
-        <div style={styles.authRequiredBox}>
-          <span style={styles.icon}>🔐</span>
-          <h2 style={styles.authTitle}>Login Required</h2>
+      <div className="container">
+        <div className="auth-required-box">
           <p>Please login to view your orders.</p>
         </div>
       </div>
@@ -72,9 +70,9 @@ const Orders = () => {
 
   if (loading) {
     return (
-      <div style={styles.container}>
-        <div style={styles.loadingContainer}>
-          <div style={styles.spinner}></div>
+      <div className="container">
+        <div className="loading-container">
+          <div className="spinner"></div>
           <p>Loading your orders...</p>
         </div>
       </div>
@@ -82,61 +80,24 @@ const Orders = () => {
   }
 
   return (
-    <div style={styles.container}>
-      <h1 style={styles.heading}>My Orders</h1>
-
+    <div className="container">
+      <h1 className="heading">My Orders</h1>
       {orders.length === 0 ? (
-        <div style={styles.emptyState}>
-          <span style={styles.emptyIcon}>📦</span>
-          <p style={styles.empty}>No orders yet</p>
-          <p style={styles.emptySubtext}>Your orders will appear here once you make a purchase</p>
+        <div className="empty-state">
+          <p className="empty-title">No orders yet</p>
+          <p className="empty-subtext">Your orders will appear here once you make a purchase</p>
         </div>
       ) : (
-        <div>
+        <div className="orders-list">
           {orders.map((order) => (
-            <div key={order.id} style={styles.orderCard}>
-              <div style={styles.orderHeader}>
-                <div>
-                  <h3 style={styles.orderId}>Order #{order.id}</h3>
-                  <p style={styles.orderDate}>
-                    {new Date(order.created_at).toLocaleDateString('en-US', {
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric',
-                    })}
-                  </p>
-                </div>
-                <div style={styles.orderMeta}>
-                  <span
-                    style={{
-                      ...styles.status,
-                      backgroundColor: getStatusColor(order.status),
-                    }}
-                  >
-                    <span style={styles.statusIcon}>
-                      {getStatusIcon(order.status)}
-                    </span>
-                    {order.status.toUpperCase()}
-                  </span>
-                  <span style={styles.orderTotal}>
-                    ${Number(order.total).toFixed(2)}
-                  </span>
-                </div>
-              </div>
-              {order.items && order.items.length > 0 && (
-                <div style={styles.orderItems}>
-                  {order.items.map((item, index) => (
-                    <div key={item.id || index} style={styles.orderItem}>
-                      <span style={styles.itemName}>{item.product_name}</span>
-                      <span style={styles.itemDetail}>×{item.quantity}</span>
-                      <span style={styles.itemPrice}>
-                        ${Number(item.price * item.quantity).toFixed(2)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <OrderCard
+              key={order.id}
+              order={order}
+              onPay={handlePayOrder}
+              onCancel={handleCancelOrder}
+              paymentLoading={paymentLoading[order.id]}
+              cancelLoading={cancelLoading[order.id]}
+            />
           ))}
         </div>
       )}
@@ -144,90 +105,72 @@ const Orders = () => {
   );
 };
 
-const styles = {
-  container: { maxWidth: '800px', margin: '0 auto', padding: '24px' },
-  heading: { color: '#2c3e50', marginBottom: '24px', fontSize: '32px' },
-  authRequiredBox: {
-    textAlign: 'center',
-    padding: '60px 20px',
-    backgroundColor: '#fff',
-    borderRadius: '8px',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-  },
-  icon: { fontSize: '60px', display: 'block', marginBottom: '16px' },
-  authTitle: { color: '#2c3e50', marginBottom: '8px' },
-  loadingContainer: {
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'center',
-    alignItems: 'center',
-    minHeight: '400px',
-    gap: '20px',
-  },
-  spinner: {
-    width: '50px',
-    height: '50px',
-    border: '4px solid #ecf0f1',
-    borderTopColor: '#3498db',
-    borderRadius: '50%',
-    animation: 'spin 1s linear infinite',
-  },
-  emptyState: {
-    textAlign: 'center',
-    padding: '60px 20px',
-    backgroundColor: '#fff',
-    borderRadius: '8px',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-  },
-  emptyIcon: { fontSize: '60px', display: 'block', marginBottom: '16px' },
-  empty: { color: '#2c3e50', fontSize: '20px', margin: '0 0 8px', fontWeight: '600' },
-  emptySubtext: { color: '#999', fontSize: '14px', margin: 0 },
-  orderCard: {
-    background: '#fff',
-    borderRadius: '8px',
-    boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
-    marginBottom: '16px',
-    overflow: 'hidden',
-    transition: 'box-shadow 0.2s',
-  },
-  orderHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '16px 20px',
-    borderBottom: '1px solid #eee',
-    flexWrap: 'wrap',
-    gap: '12px',
-  },
-  orderId: { margin: 0, color: '#2c3e50', fontSize: '16px', fontWeight: '600' },
-  orderDate: { color: '#999', fontSize: '13px', margin: '4px 0 0' },
-  orderMeta: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' },
-  status: {
-    color: '#fff',
-    padding: '6px 12px',
-    borderRadius: '12px',
-    fontSize: '12px',
-    textTransform: 'uppercase',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-    fontWeight: '600',
-  },
-  statusIcon: { fontSize: '14px' },
-  orderTotal: { fontSize: '18px', fontWeight: 'bold', color: '#2c3e50' },
-  orderItems: { padding: '12px 20px' },
-  orderItem: {
-    display: 'grid',
-    gridTemplateColumns: '1fr auto auto',
-    gap: '12px',
-    padding: '8px 0',
-    fontSize: '14px',
-    color: '#555',
-    alignItems: 'center',
-  },
-  itemName: { color: '#2c3e50', fontWeight: '500' },
-  itemDetail: { color: '#999', fontSize: '13px' },
-  itemPrice: { color: '#27ae60', fontWeight: '600', textAlign: 'right' },
-};
+function OrderCard({ order, onPay, onCancel, paymentLoading, cancelLoading }) {
+  const statusConfig = {
+    paid: { icon: CheckCircle, color: '#27ae60', label: 'Paid' },
+    pending: { icon: Clock, color: '#f39c12', label: 'Pending' },
+    cancelled: { icon: XCircle, color: '#e74c3c', label: 'Cancelled' },
+  };
+
+  const config = statusConfig[order.status] || statusConfig.pending;
+  const StatusIcon = config.icon;
+
+  return (
+    <div className="order-card">
+      <div className="order-header">
+        <div>
+          <h3 className="order-id">Order #{order.id}</h3>
+          <p className="order-date">
+            {new Date(order.created_at).toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+            })}
+          </p>
+        </div>
+        <div className="order-meta">
+          <div className="order-status" style={{ borderColor: config.color }}>
+            <StatusIcon size={16} color={config.color} />
+            <span style={{ color: config.color }}>{config.label}</span>
+          </div>
+          <span className="order-total">${Number(order.total).toFixed(2)}</span>
+        </div>
+      </div>
+
+      {order.items && order.items.length > 0 && (
+        <div className="order-items">
+          {order.items.map((item, index) => (
+            <div key={item.id || index} className="order-item">
+              <span className="item-name">{item.product_name}</span>
+              <span className="item-detail">×{item.quantity}</span>
+              <span className="item-price">${Number(item.price * item.quantity).toFixed(2)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {order.status === 'pending' && (
+        <div className="order-actions">
+          <button
+            className="btn btn-primary"
+            onClick={() => onPay(order.id)}
+            disabled={paymentLoading}
+          >
+            <CreditCard size={16} />
+            {paymentLoading ? 'Processing...' : 'Pay Now'}
+          </button>
+          <button
+            className="btn btn-danger"
+            onClick={() => onCancel(order.id)}
+            disabled={cancelLoading}
+          >
+            <X size={16} />
+            {cancelLoading ? 'Cancelling...' : 'Cancel Order'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default Orders;

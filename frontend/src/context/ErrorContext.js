@@ -5,7 +5,7 @@ const ErrorContext = createContext(null);
 export const ErrorProvider = ({ children }) => {
    const [errors, setErrors] = useState([]);
 
-   const addError = useCallback((error, duration = 5000) => {
+   const addError = useCallback((error, duration = 3000) => {
       const id = Date.now();
       const errorObj = {
          id,
