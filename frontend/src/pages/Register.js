@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { UserPlus, Mail, Lock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useError } from '../context/ErrorContext';
 
 const Register = () => {
+  const { addError } = useError();
+  const [errors, setErrors] = useState({});
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -16,8 +19,12 @@ const Register = () => {
   const navigate = useNavigate();
 
   const handleChange = (e) => {
+
+    console.log('Input change:', e.target.name, e.target.value);
+    debugger;
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+    setErrors(prev => ({ ...prev, [name]: '' }));
   };
 
   const validateForm = () => {
@@ -66,6 +73,23 @@ const Register = () => {
       }
     } catch (error) {
       console.error('Register error:', error);
+
+      if (error.details) {
+        setErrors(error.details);
+      }
+
+      addError({
+        message:
+          error.message ||
+          'Registration failed',
+
+        type: 'error',
+
+        status: error.status,
+
+        details: error.details,
+      });
+
     } finally {
       setIsSubmitting(false);
     }
@@ -105,11 +129,16 @@ const Register = () => {
               name="email"
               value={formData.email}
               onChange={handleChange}
-              className="form-input"
+              className={`form-input ${errors.email ? 'input-error' : ''}`}
               placeholder="Enter your email"
               disabled={isSubmitting || loading}
               required
             />
+            {errors.email && (
+              <p className="input-error-text">
+                {errors.email[0]}
+              </p>
+            )}
           </div>
 
           <div className="form-group">

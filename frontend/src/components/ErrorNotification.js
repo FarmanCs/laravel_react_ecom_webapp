@@ -1,5 +1,11 @@
 import React, { useState } from 'react';
 import { useError } from '../context/ErrorContext';
+import {
+   CircleX,
+   TriangleAlert,
+   Info,
+   CircleCheck
+} from 'lucide-react';
 
 const ErrorNotification = () => {
    const { errors, removeError } = useError();
@@ -20,11 +26,20 @@ const ErrorToast = ({ error, onClose }) => {
    };
    const getErrorIcon = (type) => {
       switch (type) {
-         case 'error': return '❌';
-         case 'warning': return '⚠️';
-         case 'info': return 'ℹ️';
-         case 'success': return '✅';
-         default: return '⚠️';
+         case 'error':
+            return <CircleX className="text-red-600" />;
+
+         case 'warning':
+            return <TriangleAlert className="text-yellow-500" />;
+
+         case 'info':
+            return <Info className="text-blue-500" />;
+
+         case 'success':
+            return <CircleCheck className="text-green-600" />;
+
+         default:
+            return <TriangleAlert className="text-yellow-500" />;
       }
    };
    const getToastClass = () => {
